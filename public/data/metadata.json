@@ -1,0 +1,17 @@
+{
+ "checkedDate": "2026-11-09",
+ "zoningDate": "2026-11-09",
+ "addressDate": "2026-11-09",
+ "unitsDate": "2026-11-09",
+ "zoneCount": 0,
+ "addressCount": 0,
+ "milieuCount": 0,
+ "addressShards": [],
+ "unitCount": 0,
+ "countyCount": 254,
+ "sources": [],
+ "geometryIssues": [],
+ "zoningSource": "",
+ "addressSource": "",
+ "transformations": "Live parcel queries."
+}
