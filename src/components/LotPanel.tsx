@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ArrowUpRight, ChevronDown, Copy, Eye, FileText, MapPin, UserSearch, X } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, Copy, Eye, FileText, MapPin, X } from 'lucide-react';
 import type { LotSnapshot } from '../lib/files';
 import { useDrag } from '../lib/useDrag';
 import { territoryAt, territoryLinks, type Territory, type TerritoryLinks } from '../lib/territory';
@@ -29,7 +29,8 @@ interface Props {
 export default function LotPanel({ lot, address, preferPoint, zoneLine, zoneDetails, zoneText, zoneGrid, onReport, onClose }: Props) {
   const [units, setUnits] = useState<Unit[] | null>(null);
   const [copied, setCopied] = useState(false);
-  const [ownerOpen, setOwnerOpen] = useState(false);
+  const [tab, setTab] = useState<'overview' | 'owner' | 'sales' | 'infra' | 'lot'>('overview');
+  useEffect(() => { setTab('overview'); }, [lot]);
   const [infra, setInfra] = useState<Infra | null | 'loading'>('loading');
   const [deeds, setDeeds] = useState<Deed[] | null>(null);
   useEffect(() => {
@@ -59,7 +60,7 @@ export default function LotPanel({ lot, address, preferPoint, zoneLine, zoneDeta
   }, [lot]);
   useEffect(() => {
     let active = true;
-    setUnits(null); setOwnerOpen(false);
+    setUnits(null);
     void unitsInLot(lot).then(found => { if (active) setUnits(found); }).catch(() => { if (active) setUnits([]); });
     return () => { active = false; };
   }, [lot]);
@@ -112,10 +113,13 @@ export default function LotPanel({ lot, address, preferPoint, zoneLine, zoneDeta
     {units === null && <p className="detail-note" role="status">Loading assessment…</p>}
     {units?.length === 0 && <p className="detail-note">No assessment record on this parcel. Check the county’s real property office.</p>}
 
-    {unit && <>
+    {unit && <div className="tabs" role="tablist">{(['overview', 'owner', 'sales', 'infra', 'lot'] as const).map(t => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
+      {t === 'overview' ? 'Overview' : t === 'owner' ? 'Owner' : t === 'sales' ? 'Sales' : t === 'infra' ? 'Utilities' : 'Lot'}</button>)}</div>}
+
+    {unit && tab === 'overview' && <>
       <div className="value-hero"><span>Appraised market value</span><strong>{unit.marketValue ? money(unit.marketValue) : 'Not published'}</strong>
         <small>{unit.marketValue ? <>{unit.marketDate || 'Appraisal roll'} · {unit.appraisalDistrict || 'appraisal district'}</> : 'This appraisal district does not share values statewide — see its site.'}</small></div>
-      <div className="owner-line"><span>Owner of record</span><b>{unit.owner || 'Not published — see the appraisal district'}</b>{unit.ownerMail && <small>{unit.ownerMail}</small>}</div>
+      <button className="owner-line as-link" onClick={() => setTab('owner')}><span>Owner of record</span><b>{unit.owner || 'Not published — see the appraisal district'}</b><small>Owner details →</small></button>
       {unit.marketValue ? <table className="appraisal"><tbody>
         <tr><th>Land value</th><td>{money(unit.landValue)}</td></tr>
         <tr><th>Improvements</th><td>{money(unit.buildingValue)}</td></tr>
@@ -133,12 +137,34 @@ export default function LotPanel({ lot, address, preferPoint, zoneLine, zoneDeta
         {(unit.landmark || unit.histDistrict) && <div><dt>Landmark</dt><dd>{[unit.landmark, unit.histDistrict].filter(Boolean).join(' · ')}</dd></div>}
         {unit.agDistrict && <div><dt>Agricultural district</dt><dd>{unit.agDistrict}</dd></div>}
       </dl>
+    </>}
+
+    {unit && tab === 'owner' && <div className="tab-body">
+      <div className="owner-line"><span>Owner of record</span><b>{unit.owner || 'Not published — see the appraisal district'}</b></div>
+      <dl className="fact-grid">
+        <div><dt>Mailing address</dt><dd>{unit.ownerMail || '—'}</dd></div>
+        <div><dt>Property ID</dt><dd>{key}</dd></div>
+        <div><dt>Appraisal district</dt><dd>{unit.appraisalDistrict || '—'}</dd></div>
+        <div><dt>County</dt><dd>{unit.county || '—'}</dd></div>
+        {deeds?.[0] && <div><dt>Last deed</dt><dd>{deeds[0].date}<small>{[deeds[0].kind, deeds[0].ref].filter(Boolean).join(' · ')}</small></dd></div>}
+      </dl>
+      {unit.legal && <p className="detail-foot">Legal description: {unit.legal}</p>}
+      <ol className="owner-links">
+        {acris && <li><a href={acris} target="_blank" rel="noreferrer">ACRIS deeds & mortgages <ArrowUpRight size={11}/></a> — recorded documents for this BBL, free.</li>}
+        {links?.roll && <li><a href={links.roll} target="_blank" rel="noreferrer">{unit?.appraisalDistrict || 'Appraisal district'} property search <ArrowUpRight size={11}/></a> — property ID {key}.</li>}
+        <li><a href={`https://www.google.com/search?q=${encodeURIComponent(`${unit?.county || ''} Texas county clerk real property records search`)}`} target="_blank" rel="noreferrer">County clerk records <ArrowUpRight size={11}/></a> — deeds and deeds of trust.</li>
+      </ol>
+      <p className="detail-foot">Owner on the appraisal district roll (TxGIO StratMap). Confirm the vesting deed in the county clerk’s real property records.</p>
+    </div>}
+
+    {unit && tab === 'sales' && <div className="tab-body">
       <div className="sales"><b>Sales & deed history</b>
         {deeds?.length ? deeds.map((d, i) => <div key={i}><span>{d.date}</span><strong>Last deed</strong><small>{[d.kind, d.ref].filter(Boolean).join(' · ')}</small></div>) : null}
         <p className="detail-foot">Texas is a non-disclosure state: sale prices are not public records. {deeds?.length ? `Last deed from the ${DEED_COUNTIES[unit.county || '']}. ` : ''}Every deed (dates, grantor, grantee) is in the <a href={`https://www.google.com/search?q=${encodeURIComponent(`${unit.county || ''} Texas county clerk real property records search`)}`} target="_blank" rel="noreferrer">county clerk’s records <ArrowUpRight size={10}/></a>; sold prices come from the MLS.</p>
       </div>
-      <details className="infra" open>
-        <summary>Infrastructure availability<ChevronDown size={14}/></summary>
+    </div>}
+
+    {unit && tab === 'infra' && <div className="tab-body infra">
         {infra === 'loading' ? <p className="detail-note">Checking utilities…</p> : <ul>
           <li className={infra?.water.length ? 'ok' : 'q'}><span>Water</span><b>{infra?.water.length ? infra.water.join(', ') : 'No CCN — city utility or well'}</b></li>
           <li className={infra?.sewer.length ? 'ok' : 'q'}><span>Sewer</span><b>{infra?.sewer.length ? infra.sewer.join(', ') : 'No CCN — city sewer or septic'}</b></li>
@@ -148,13 +174,11 @@ export default function LotPanel({ lot, address, preferPoint, zoneLine, zoneDeta
           <li className="q"><span>Gas · road · drainage · fees</span><b>Confirm with utilities and the city or county</b></li>
         </ul>}
         <p className="detail-foot">Water and sewer: PUCT certificated service areas (CCN). Cities often serve without a CCN. Districts: TCEQ water districts. Electric: EIA service territories (HIFLD). Full checklist in the property file.</p>
-      </details>
-      {unit.legal && <p className="detail-foot">Legal: {unit.legal}</p>}
-    </>}
-    {!unit && area !== null && <dl className="fact-grid"><div><dt>Lot area (drawing)</dt><dd>{sqft(area, true)}</dd></div></dl>}
+    </div>}
 
-    {edges.length > 0 && <details className="measure">
-      <summary>Lot measurements<ChevronDown size={14}/></summary>
+    {(tab === 'lot' || !unit) && <div className="tab-body">
+      {!unit && area !== null && <dl className="fact-grid"><div><dt>Lot area (drawing)</dt><dd>{sqft(area, true)}</dd></div></dl>}
+      {edges.length > 0 && <>
       <dl className="fact-grid">
         {unit?.frontage != null && <div><dt>Frontage (roll)</dt><dd>{len(unit.frontage)}</dd></div>}
         {unit?.depth != null && <div><dt>Depth (roll)</dt><dd>{len(unit.depth)}</dd></div>}
@@ -163,19 +187,9 @@ export default function LotPanel({ lot, address, preferPoint, zoneLine, zoneDeta
       </dl>
       <ol className="side-list">{edges.map((e, i) => <li key={i}><span>Side {i + 1}</span><strong>{(e.length * FT_PER_M).toFixed(1)} ft</strong><small>{e.length.toFixed(1)} m</small></li>)}</ol>
       <p className="detail-foot">Sides are measured on the county parcel map drawing, not a survey.</p>
-    </details>}
-
-    <button className="owner-button" onClick={() => setOwnerOpen(o => !o)} disabled={units === null}><UserSearch size={15}/> Get owner</button>
-    {ownerOpen && <div className="owner-steps" role="status">
-      {unit?.owner ? <><b>{unit.owner}</b>{unit.ownerMail && <p>Mailing address: {unit.ownerMail}</p>}<p className="detail-foot">Owner on the appraisal district roll (TxGIO StratMap). Confirm the vesting deed in the county clerk’s real property records.</p></>
-        : <p>No owner name on this record. Use the county property appraiser’s search below.</p>}
-      <ol>
-        {acris && <li><a href={acris} target="_blank" rel="noreferrer">ACRIS deeds & mortgages <ArrowUpRight size={11}/></a> — recorded documents for this BBL, free.</li>}
-        {links?.roll && <li><a href={links.roll} target="_blank" rel="noreferrer">{unit?.appraisalDistrict || 'Appraisal district'} property search <ArrowUpRight size={11}/></a> — property ID {key}.</li>}
-        <li><a href={`https://www.google.com/search?q=${encodeURIComponent(`${unit?.county || ''} Texas county clerk real property records search`)}`} target="_blank" rel="noreferrer">County clerk records <ArrowUpRight size={11}/></a> — deeds and deeds of trust.</li>
-      </ol>
-      <button onClick={() => setOwnerOpen(false)}>Close</button>
+      </>}
     </div>}
+
     {onReport && <button className="report-button" onClick={report} disabled={units === null}><FileText size={15}/> Create report</button>}
     {viewPoint && <a className="street-view-button" href={streetViewUrl(viewPoint)} target="_blank" rel="noreferrer"><Eye size={15}/> Street View <ArrowUpRight size={13}/></a>}
 
