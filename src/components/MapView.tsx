@@ -19,6 +19,7 @@ interface Props {
   lotsVisible: boolean;
   selectedLot: LotFeature | null;
   onLotClick: (lot: string) => void;
+  onPointClick?: (coordinates: [number, number]) => void;
   onSelect: (code: string) => void;
   onMove: (position: MapPosition) => void;
 }
@@ -124,9 +125,35 @@ export default function MapView(props: Props) {
             layout: { 'text-field': ['get', 'label'], 'text-size': 12, 'text-font': ['Noto Sans Regular'], 'text-rotate': ['get', 'angle'],
               'text-rotation-alignment': 'map', 'text-allow-overlap': true, 'text-ignore-placement': true, 'text-offset': [0, -0.7] },
             paint: { 'text-color': '#1d3326', 'text-halo-color': '#fff8d6', 'text-halo-width': 2 } });
-          instance.on('click', 'lot-hit', e => {
-            const lot = e.features?.[0]?.properties?.NO_LOT;
-            if (typeof lot === 'string') callbacks.current.onLotClick(lot);
+          instance.addLayer({ id: 'lot-hover', type: 'fill', source: 'lots', filter: ['==', ['get', 'NO_LOT'], ''], paint: { 'fill-color': '#f2c200', 'fill-opacity': 0.28 } });
+          // Hovering a parcel highlights it and names it; one map-wide handler so it follows the pointer and clears off-parcel, off-map, on drag and zoom.
+          const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: 'lot-tip', offset: 12 });
+          let hovered = '';
+          const clearHover = () => {
+            if (!instance || !hovered) return;
+            hovered = ''; instance.getCanvas().style.cursor = '';
+            instance.setFilter('lot-hover', ['==', ['get', 'NO_LOT'], '']); tip.remove();
+          };
+          instance.on('mousemove', e => {
+            if (!instance || !instance.getLayer('lot-hit')) return;
+            const p = instance.queryRenderedFeatures(e.point, { layers: ['lot-hit'] })[0]?.properties;
+            if (!p) { clearHover(); return; }
+            const id = String(p.NO_LOT);
+            instance.getCanvas().style.cursor = 'pointer';
+            tip.setLngLat(e.lngLat);
+            if (id === hovered) return;
+            hovered = id;
+            instance.setFilter('lot-hover', ['==', ['get', 'NO_LOT'], id]);
+            tip.setHTML(`<b>Parcel ${String(p.LABEL || p.NO_LOT).replace(/[<>&]/g, '')}</b><br><small>Click for owner, value & sales</small>`).addTo(instance);
+          });
+          instance.getContainer().addEventListener('mouseleave', clearHover);
+          instance.on('dragstart', clearHover);
+          instance.on('zoomstart', clearHover);
+          // A click at street zoom opens the parcel under the pointer (outlines shown or not).
+          instance.on('click', e => {
+            if (!instance || instance.getZoom() < 13) return;
+            clearHover();
+            callbacks.current.onPointClick?.([e.lngLat.lng, e.lngLat.lat]);
           });
           instance.on('moveend', () => refreshLots());
           // Right-click (long-press on touch) anywhere offers Street View at that spot.
@@ -164,7 +191,7 @@ export default function MapView(props: Props) {
       if (!callbacks.current.lotsVisible || m.getZoom() < LOT_MIN_ZOOM) {
         source.setData({ type: 'FeatureCollection', features: [] });
         (m.getSource('lot-all-dims') as maplibregl.GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: [] });
-        setLotStatus(callbacks.current.lotsVisible ? 'Zoom in to see tax parcels' : '');
+        setLotStatus(callbacks.current.lotsVisible ? (m.getZoom() >= 13 ? 'Click any spot to open its parcel, or zoom in to see outlines' : 'Zoom in to see tax parcels') : '');
         return;
       }
       const controller = new AbortController(); lotRequest.current = controller;
@@ -209,7 +236,7 @@ export default function MapView(props: Props) {
   useEffect(() => {
     const m = map.current;
     if (!m || !ready) return;
-    for (const id of ['lot-hit', 'lot-line', 'lot-label']) if (m.getLayer(id)) m.setLayoutProperty(id, 'visibility', props.lotsVisible ? 'visible' : 'none');
+    for (const id of ['lot-hit', 'lot-hover', 'lot-line', 'lot-label']) if (m.getLayer(id)) m.setLayoutProperty(id, 'visibility', props.lotsVisible ? 'visible' : 'none');
     refreshLotsRef.current();
   }, [props.lotsVisible, ready]);
 

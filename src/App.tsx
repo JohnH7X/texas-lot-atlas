@@ -118,6 +118,18 @@ export default function App() {
       setSelectedLot(lot); setLastLot(''); setLotState(lot ? 'idle' : 'notfound');
     } catch { if (id === lotSearchId.current) setLotState('error'); }
   }
+  async function lotAt(coordinates: [number, number]) {
+    const id = ++lotSearchId.current;
+    setLotState('loading'); setLotsVisible(true);
+    try {
+      const lot = await lotAtPoint(coordinates);
+      if (id !== lotSearchId.current) return;
+      if (!lot) { setLotState('notfound'); return; }
+      setSelectedLot(lot); setSelectedAddress(''); setAddressCoordinates(null); setLastLot(''); setLotState('idle');
+      const center = lotCenter(lot);
+      if (center) { void scopeAt(center, true); setFocus({ coordinates: center, zoom: 18, serial: Date.now() }); }
+    } catch { if (id === lotSearchId.current) setLotState('error'); }
+  }
   async function searchLot(input: string) {
     const id = ++lotSearchId.current;
     if (!normalizeLot(input)) { setLotState('invalid'); return; }
@@ -182,7 +194,7 @@ export default function App() {
     </header>
     <main className="workspace">
       {metadata && <MapView initial={initial} selected={selected} milieu={view.milieu} zoneFilter={view.zoneFilter} activityTypes={scopeTypes} visible={view.visible} opacity={opacity} focus={focus} addressCoordinates={addressCoordinates}
-        lotsVisible={lotsVisible} selectedLot={selectedLot} onLotClick={lot => void searchLot(lot)}
+        lotsVisible={lotsVisible} selectedLot={selectedLot} onLotClick={lot => void searchLot(lot)} onPointClick={c => void lotAt(c)}
         onSelect={code => { setView(current => ({ ...current, zone: code })); const z = zones.find(x => x.code === code); if (z && scope && zoneCity(z) !== scope) setScope(zoneCity(z)); }}
         onMove={position => setView(current => ({ ...current, ...position }))}/>}
       {error && <div className="fatal-error" role="alert">{error}<button onClick={() => window.location.reload()}>Reload map</button></div>}
