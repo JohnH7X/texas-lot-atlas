@@ -57,6 +57,15 @@ export const PREOFFER_CHECKS: Check[] = [
   { key: 'comparables', label: 'Comparable sales pulled from the MLS (non-disclosure state)' },
   { key: 'zoning', label: 'Zoning or deed restrictions checked' },
   { key: 'permits', label: 'Permits and code cases searched with the city' },
+  { key: 'water', label: 'Infrastructure · Water provider (city, CCN utility, water supply corp.) or private well', url: 'https://www.puc.texas.gov/industry/water/utilities/map.aspx', hint: 'Ask for a will-serve letter; a well needs a water test and TCEQ well log.' },
+  { key: 'sewer', label: 'Infrastructure · Sewer provider or on-site septic (OSSF permit)', url: 'https://www.tceq.texas.gov/permitting/ossf', hint: 'Septic: get the OSSF permit and an inspection from the county or authorized agent.' },
+  { key: 'electric', label: 'Infrastructure · Electric utility (deregulated ERCOT area: choose a retail provider)', url: 'https://www.powertochoose.org/' },
+  { key: 'gas', label: 'Infrastructure · Natural gas available (or propane)' },
+  { key: 'broadband', label: 'Infrastructure · Internet / broadband providers at the address', url: 'https://broadbandmap.fcc.gov/home' },
+  { key: 'road', label: 'Infrastructure · Legal access on a public road; who maintains it (city, county, HOA, private)' },
+  { key: 'drainage', label: 'Infrastructure · Drainage, detention and floodplain permits' },
+  { key: 'fees', label: 'Infrastructure · Tap, impact and capacity fees (vacant land / new build)' },
+  { key: 'hydrant', label: 'Infrastructure · Fire hydrant and fire station distance (insurance rating)' },
   { key: 'flood', label: 'FEMA flood zone checked (and flood insurance quote)', url: 'https://msc.fema.gov/portal/search' },
   { key: 'environment', label: 'TCEQ records searched (contamination, OSSF)', url: 'https://www.tceq.texas.gov/agency/data/records-services' },
   { key: 'disclosure', label: 'Seller’s Disclosure Notice received and reviewed' },
@@ -97,6 +106,15 @@ export function preofferFindings(f: PropertyFile): Record<string, Finding> {
   const s = f.snapshot, u = s.unit, out: Record<string, Finding> = {};
   const price = Number(f.mandate.price || f.listing.price || f.mandate.budget) || 0;
   if (u) out.roll = { note: [u.owner && `Owner: ${u.owner}`, u.use, u.builtYear && `built ${u.builtYear}`, u.marketValue ? `market ${money(u.marketValue)}` : 'values not shared statewide', u.appraisalDistrict, u.marketDate].filter(Boolean).join(' · ') + '.', done: true };
+  const inf = u?.infra;
+  if (inf) {
+    out.water = { note: inf.water.length ? `Inside the PUCT water service area (CCN) of ${inf.water.join(', ')}. Ask for a will-serve letter.` : 'No PUCT water CCN here: likely a city utility or a private well. Confirm with the city.' };
+    out.sewer = { note: inf.sewer.length ? `Inside the PUCT sewer service area (CCN) of ${inf.sewer.join(', ')}.` : 'No PUCT sewer CCN here: city sewer or on-site septic (OSSF). Confirm with the city or county.' };
+    if (inf.electric.length) out.electric = { note: `Electric territory: ${inf.electric.join(', ')} (EIA/HIFLD). In deregulated areas pick a retail provider.` };
+    if (inf.mud) out.mud = { note: `Inside ${inf.districts.filter(d => /utility|water control|fresh water|levee|management/i.test(d.type)).map(d => d.name).join(', ')}: the MUD / district notice is required and adds a district tax.` };
+    else out.mud = { note: `No MUD or utility district on the TCEQ map${inf.districts.length ? ` (also inside: ${inf.districts.map(d => d.name).join(', ')})` : ''}. Still check for a PID with the city.` };
+  }
+  if (s.center) out.broadband = { note: `Check providers at ${s.center[1].toFixed(5)}, ${s.center[0].toFixed(5)} on the FCC broadband map.` };
   out.survey = { note: `Property ID ${s.lot}${s.area ? ` · about ${Math.round(s.area * 10.7639).toLocaleString()} ft² on the parcel map` : ''}${u?.legal ? ` · legal: ${u.legal}` : ''}. Compare with the survey or T-47.` };
   out.comparables = { note: 'Texas does not disclose sale prices publicly: use MLS sold data.' };
   out.zoning = { note: /Houston/i.test(u?.muni || s.place) ? 'Houston has no zoning: check deed restrictions and city ordinances.' : `Check ${u?.muni ? `the City of ${u.muni[0] + u.muni.slice(1).toLowerCase()}` : 'the city'}’s zoning, or county rules outside city limits.` };

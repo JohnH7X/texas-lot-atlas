@@ -116,7 +116,7 @@ export interface Unit {
   zoning?: string | null; overlays?: string | null; special?: string | null; far?: string | null; landmark?: string | null; histDistrict?: string | null;
   depth?: number | null;
   taxableValue?: number | null; homestead?: boolean; legal?: string | null; sales?: { price: number; date: string; qualified: boolean }[];
-  effYear?: number | null; buildings?: number | null; appraisalDistrict?: string | null;
+  effYear?: number | null; buildings?: number | null; appraisalDistrict?: string | null; infra?: Infra | null; deeds?: Deed[] | null;
 }
 
 const num = (v: unknown) => typeof v === 'number' && v > 0 ? v : typeof v === 'string' && Number(v) > 0 ? Number(v) : null;
@@ -131,6 +131,50 @@ export function useLabel(code: string | null): string | null {
   const c = code.trim().toUpperCase();
   return SPTB[c[0]] ? `${SPTB[c[0]]} (${c})` : c;
 }
+
+export interface Deed { date: string; kind: string | null; ref: string | null }
+export interface Infra { water: string[]; sewer: string[]; electric: string[]; districts: { name: string; type: string }[]; mud: boolean }
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const fmt = (d: Date) => `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+async function arc(url: string, [x, y]: [number, number], outFields: string) {
+  const q = new URLSearchParams({ geometry: `${x},${y}`, geometryType: 'esriGeometryPoint', inSR: '4326', spatialRel: 'esriSpatialRelIntersects', outFields, returnGeometry: 'false', f: 'json' });
+  const d = await (await fetch(`${url}/query?${q}`)).json();
+  return (d.features || []).map((f: { attributes: Record<string, unknown> }) => f.attributes) as Record<string, unknown>[];
+}
+const WATER_CCN = 'https://services2.arcgis.com/LYMgRMwHfrWWEg3s/arcgis/rest/services/PUCT_Water_CCN_Service_Areas/FeatureServer/0';
+const SEWER_CCN = 'https://services3.arcgis.com/65cjxRz7QPkb5HMT/arcgis/rest/services/PUC_CCN_SEWER_TSMS/FeatureServer/1';
+const ELECTRIC = 'https://services2.arcgis.com/LYMgRMwHfrWWEg3s/arcgis/rest/services/HIFLD_Electric_Retail_Service_Territories/FeatureServer/0';
+const DISTRICTS = 'https://gisweb.tceq.texas.gov/arcgis/rest/services/Public/WaterDistricts/MapServer/0';
+const DTYPE: Record<string, string> = { MUD: 'Municipal utility district', WCID: 'Water control & improvement district', FWSD: 'Fresh water supply district', SUD: 'Special utility district',
+  RA: 'River authority', UD: 'Utility district', LID: 'Levee improvement district', DD: 'Drainage district', MMD: 'Municipal management district', GCD: 'Groundwater district', OTH: 'Other district', WSC: 'Water supply corporation' };
+/** Water & sewer service areas (PUCT CCNs), water districts (TCEQ) and electric provider (HIFLD/EIA) at a point. */
+export async function infrastructureAt(c: [number, number]): Promise<Infra> {
+  const names = (rows: Record<string, unknown>[], k: string) => [...new Set(rows.map(r => String(r[k] || '').trim()).filter(Boolean))];
+  const [w, s, e, d] = await Promise.all([arc(WATER_CCN, c, 'UTILITY,CCN_NO'), arc(SEWER_CCN, c, 'UTILITY,CCN_NO'), arc(ELECTRIC, c, 'NAME,TYPE'), arc(DISTRICTS, c, 'NAME,TYPE')]
+    .map(p => p.catch(() => [] as Record<string, unknown>[])));
+  const districts = d.map(r => ({ name: String(r.NAME || ''), type: DTYPE[String(r.TYPE)] || String(r.TYPE || '') })).filter(x => x.name);
+  return { water: names(w, 'UTILITY').map(title) as string[], sewer: names(s, 'UTILITY').map(title) as string[], electric: names(e, 'NAME').map(title) as string[], districts,
+    mud: d.some(r => ['MUD', 'WCID', 'FWSD', 'UD', 'LID', 'MMD'].includes(String(r.TYPE))) };
+}
+
+/** Last recorded deed, from appraisal-district data published as open GIS (Tarrant, Denton). */
+export const DEED_COUNTIES: Record<string, string> = { 'Tarrant County': 'appraisal roll as published by the City of Fort Worth (Fort Worth area)', 'Denton County': 'Denton Central Appraisal District roll' };
+export async function deedsAt(county: string | null | undefined, c: [number, number]): Promise<Deed[] | null> {
+  if (county === 'Tarrant County') {
+    const r = (await arc('https://services5.arcgis.com/3ddLCBXe1bRt7mzj/arcgis/rest/services/Parcels_Public_Vview/FeatureServer/0', c, 'DEED_DATE,DEED_BOOK,DEED_PAGE'))[0];
+    const m = String(r?.DEED_DATE || '').match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+    if (!r || !m || m[3] === '1900') return null;
+    const ref = r.DEED_BOOK && r.DEED_PAGE ? `Vol. ${r.DEED_BOOK} / pg. ${r.DEED_PAGE}` : r.DEED_BOOK ? `Instr. ${r.DEED_BOOK}` : null;
+    return [{ date: fmt(new Date(Date.UTC(+m[3], +m[1] - 1, +m[2]))), kind: null, ref }];
+  }
+  if (county === 'Denton County') {
+    const rows = await arc('https://services1.arcgis.com/qr14biwnHA6Vis6l/arcgis/rest/services/Denton_CAD_Parcels/FeatureServer/0', c, 'deedDt,instrumentNum,deedType');
+    return rows.filter(r => typeof r.deedDt === 'number').map(r => ({ date: fmt(new Date(r.deedDt as number)), kind: DEED[String(r.deedType)] || String(r.deedType || '') || null,
+      ref: r.instrumentNum ? `Instr. ${r.instrumentNum}` : null })).slice(0, 1);
+  }
+  return null;
+}
+const DEED: Record<string, string> = { WD: 'Warranty deed', WDV: 'Warranty deed w/ vendor’s lien', SWD: 'Special warranty deed', SW: 'Special warranty deed', SWV: 'Special warranty deed w/ vendor’s lien', GN: 'General warranty deed', GNV: 'General warranty deed w/ vendor’s lien', QC: 'Quitclaim deed', QCD: 'Quitclaim deed' };
 
 /** The parcel's appraisal record as a unit (one per parcel in StratMap). */
 export async function unitsInLot(feature: LotFeature): Promise<Unit[]> {

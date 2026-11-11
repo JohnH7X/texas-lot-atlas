@@ -3,7 +3,7 @@ import { ArrowUpRight, ChevronDown, Copy, Eye, FileText, MapPin, UserSearch, X }
 import type { LotSnapshot } from '../lib/files';
 import { useDrag } from '../lib/useDrag';
 import { territoryAt, territoryLinks, type Territory, type TerritoryLinks } from '../lib/territory';
-import { FT_PER_M, lotArea, lotCenter, lotEdges, SQFT_PER_M2, streetViewUrl, unitsInLot, type LotFeature, type Unit } from '../lib/lots';
+import { deedsAt, DEED_COUNTIES, infrastructureAt, type Deed, type Infra, FT_PER_M, lotArea, lotCenter, lotEdges, SQFT_PER_M2, streetViewUrl, unitsInLot, type LotFeature, type Unit } from '../lib/lots';
 
 const n = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 const dollars = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -30,6 +30,21 @@ export default function LotPanel({ lot, address, preferPoint, zoneLine, zoneDeta
   const [units, setUnits] = useState<Unit[] | null>(null);
   const [copied, setCopied] = useState(false);
   const [ownerOpen, setOwnerOpen] = useState(false);
+  const [infra, setInfra] = useState<Infra | null | 'loading'>('loading');
+  const [deeds, setDeeds] = useState<Deed[] | null>(null);
+  useEffect(() => {
+    let active = true; setInfra('loading');
+    const c = lotCenter(lot);
+    if (!c) { setInfra(null); return; }
+    void infrastructureAt(c).then(r => { if (active) setInfra(r); }).catch(() => { if (active) setInfra(null); });
+    return () => { active = false; };
+  }, [lot]);
+  useEffect(() => {
+    let active = true; setDeeds(null);
+    const c = lotCenter(lot), county = units?.[0]?.county;
+    if (c && county && DEED_COUNTIES[county]) void deedsAt(county, c).then(r => { if (active) setDeeds(r); }).catch(() => {});
+    return () => { active = false; };
+  }, [units, lot]);
   const [territory, setTerritory] = useState<{ place: Territory; links: TerritoryLinks | null } | null | 'none'>(null);
   const drag = useDrag('detail');
   useEffect(() => {
@@ -78,7 +93,7 @@ export default function LotPanel({ lot, address, preferPoint, zoneLine, zoneDeta
       lot: key, address: title || '', place: placeLabel, zone: zoneText || (unit?.zoning ? `Zoning ${unit.zoning}${unit.overlays ? ` · overlays ${unit.overlays}` : ''}${unit.special ? ` · special district ${unit.special}` : ''}` : ''),
       zoneGrid: zola || zoneGrid, zoningUrl: links?.zoning, rollUrl: acris || rollUrl,
       center: viewPoint, rings: polys.map(p => p[0].map(([x, y]) => [x, y] as [number, number])), area, perimeter, sides: edges.map(e => e.length),
-      unit: unit || null, capturedAt: new Date().toISOString()
+      unit: unit ? { ...unit, infra: infra === 'loading' ? null : infra, deeds } : null, capturedAt: new Date().toISOString()
     });
   }
 
@@ -99,7 +114,13 @@ export default function LotPanel({ lot, address, preferPoint, zoneLine, zoneDeta
 
     {unit && <>
       <div className="value-hero"><span>Appraised market value</span><strong>{unit.marketValue ? money(unit.marketValue) : 'Not published'}</strong>
-        <small>{unit.marketValue ? <>Land {money(unit.landValue)} · Improvements {money(unit.buildingValue)}{unit.marketDate && <> · {unit.marketDate}</>}</> : 'This appraisal district does not share values statewide — see its site.'}</small></div>
+        <small>{unit.marketValue ? <>{unit.marketDate || 'Appraisal roll'} · {unit.appraisalDistrict || 'appraisal district'}</> : 'This appraisal district does not share values statewide — see its site.'}</small></div>
+      <div className="owner-line"><span>Owner of record</span><b>{unit.owner || 'Not published — see the appraisal district'}</b>{unit.ownerMail && <small>{unit.ownerMail}</small>}</div>
+      {unit.marketValue ? <table className="appraisal"><tbody>
+        <tr><th>Land value</th><td>{money(unit.landValue)}</td></tr>
+        <tr><th>Improvements</th><td>{money(unit.buildingValue)}</td></tr>
+        <tr className="sum"><th>Market value</th><td>{money(unit.marketValue)}</td></tr>
+      </tbody></table> : null}
       <dl className="fact-grid">
         <div><dt>Lot area</dt><dd>{sqft(unit.landArea ?? area, true)}</dd></div>
         <div><dt>Appraisal district</dt><dd>{unit.appraisalDistrict || '—'}</dd></div>
@@ -112,7 +133,22 @@ export default function LotPanel({ lot, address, preferPoint, zoneLine, zoneDeta
         {(unit.landmark || unit.histDistrict) && <div><dt>Landmark</dt><dd>{[unit.landmark, unit.histDistrict].filter(Boolean).join(' · ')}</dd></div>}
         {unit.agDistrict && <div><dt>Agricultural district</dt><dd>{unit.agDistrict}</dd></div>}
       </dl>
-      {!!unit.sales?.length && <div className="sales"><b>Recent sales</b>{unit.sales.map((x, i) => <div key={i}><span>{x.date}</span><strong>{money(x.price)}</strong><small>{x.qualified ? 'arm’s length' : 'not qualified'}</small></div>)}</div>}
+      <div className="sales"><b>Sales & deed history</b>
+        {deeds?.length ? deeds.map((d, i) => <div key={i}><span>{d.date}</span><strong>Last deed</strong><small>{[d.kind, d.ref].filter(Boolean).join(' · ')}</small></div>) : null}
+        <p className="detail-foot">Texas is a non-disclosure state: sale prices are not public records. {deeds?.length ? `Last deed from the ${DEED_COUNTIES[unit.county || '']}. ` : ''}Every deed (dates, grantor, grantee) is in the <a href={`https://www.google.com/search?q=${encodeURIComponent(`${unit.county || ''} Texas county clerk real property records search`)}`} target="_blank" rel="noreferrer">county clerk’s records <ArrowUpRight size={10}/></a>; sold prices come from the MLS.</p>
+      </div>
+      <details className="infra" open>
+        <summary>Infrastructure availability<ChevronDown size={14}/></summary>
+        {infra === 'loading' ? <p className="detail-note">Checking utilities…</p> : <ul>
+          <li className={infra?.water.length ? 'ok' : 'q'}><span>Water</span><b>{infra?.water.length ? infra.water.join(', ') : 'No CCN — city utility or well'}</b></li>
+          <li className={infra?.sewer.length ? 'ok' : 'q'}><span>Sewer</span><b>{infra?.sewer.length ? infra.sewer.join(', ') : 'No CCN — city sewer or septic'}</b></li>
+          <li className={infra?.electric.length ? 'ok' : 'q'}><span>Electric</span><b>{infra?.electric.length ? <>{infra.electric.join(', ')}{infra.electric.length > 1 && <small> (utilities serving this area — confirm which serves the lot)</small>}</> : 'Check with the utility'}</b></li>
+          <li className={infra?.mud ? 'warn' : 'q'}><span>Districts</span><b>{infra?.districts.length ? infra.districts.map(d => `${d.name}`).join(' · ') : 'None mapped'}{infra?.mud && <small> MUD notice required · extra district tax</small>}</b></li>
+          <li className="q"><span>Internet</span><b>{viewPoint && <a href={`https://broadbandmap.fcc.gov/location-summary/fixed?lat=${viewPoint[1]}&lon=${viewPoint[0]}&zoom=17`} target="_blank" rel="noreferrer">FCC broadband map <ArrowUpRight size={10}/></a>}</b></li>
+          <li className="q"><span>Gas · road · drainage · fees</span><b>Confirm with utilities and the city or county</b></li>
+        </ul>}
+        <p className="detail-foot">Water and sewer: PUCT certificated service areas (CCN). Cities often serve without a CCN. Districts: TCEQ water districts. Electric: EIA service territories (HIFLD). Full checklist in the property file.</p>
+      </details>
       {unit.legal && <p className="detail-foot">Legal: {unit.legal}</p>}
     </>}
     {!unit && area !== null && <dl className="fact-grid"><div><dt>Lot area (drawing)</dt><dd>{sqft(area, true)}</dd></div></dl>}
