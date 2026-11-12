@@ -269,3 +269,16 @@ export function lotEdges(feature: LotFeature): LotEdge[] {
   }).filter(e => e.length >= 0.5);
 }
 export const FT_PER_M = 3.28084;
+
+const tipEsc = (v: unknown) => String(v ?? '').replace(/[<>&"]/g, '');
+const tipRow = (a: string, b: string) => `<div class="tip-sale"><span>${tipEsc(a)}</span><b>${tipEsc(b)}</b></div>`;
+/** Hover label body for the Sales tab: last deed where the county publishes it; Texas keeps sale prices private. */
+export async function hoverSales(c: [number, number]): Promise<string> {
+  const lot = await lotAtPoint(c); if (!lot) return '<br><small>No parcel here</small>';
+  const u = (await unitsInLot(lot))[0];
+  const addr = u?.label && u.label !== lot.properties.LABEL ? `<br>${tipEsc(u.label)}` : '';
+  const deeds = u?.county && DEED_COUNTIES[u.county] ? await deedsAt(u.county, c).catch(() => null) : null;
+  const rows = deeds?.length ? deeds.slice(0, 2).map(d => tipRow(d.date, d.kind || 'Deed')).join('') : '';
+  const value = u?.marketValue ? tipRow('Market value', '$' + u.marketValue.toLocaleString('en-US')) : '';
+  return `${addr}${rows}${value}<small>${rows ? 'Sale prices aren’t public in Texas' : 'Texas doesn’t publish sale prices'} · click for deed records</small>`;
+}

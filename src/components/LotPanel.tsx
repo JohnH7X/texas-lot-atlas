@@ -29,8 +29,10 @@ interface Props {
 export default function LotPanel({ lot, address, preferPoint, zoneLine, zoneDetails, zoneText, zoneGrid, onReport, onClose }: Props) {
   const [units, setUnits] = useState<Unit[] | null>(null);
   const [copied, setCopied] = useState(false);
-  const [tab, setTab] = useState<'overview' | 'owner' | 'sales' | 'infra' | 'lot'>('overview');
-  useEffect(() => { setTab('overview'); }, [lot]);
+  // The chosen tab stays open as you move from parcel to parcel; the map reads it to tailor the hover label.
+  const [tab, setTabState] = useState<'overview' | 'owner' | 'sales' | 'infra' | 'lot'>(() => (document.body.dataset.lotTab as 'sales') || 'overview');
+  const setTab = (t: typeof tab) => { document.body.dataset.lotTab = t; setTabState(t); };
+  useEffect(() => () => { delete document.body.dataset.lotTab; }, []);
   const [infra, setInfra] = useState<Infra | null | 'loading'>('loading');
   const [deeds, setDeeds] = useState<Deed[] | null>(null);
   useEffect(() => {

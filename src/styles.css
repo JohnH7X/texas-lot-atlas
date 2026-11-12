@@ -229,3 +229,6 @@ body.dragging,body.dragging .drag-handle{cursor:grabbing;user-select:none}
 .lot-tip{pointer-events:none}
 .lot-tip .maplibregl-popup-content{padding:7px 10px;border-radius:8px;font-size:12.5px;line-height:1.35;box-shadow:0 4px 14px rgba(0,0,0,.18)}
 .lot-tip small{color:#5c6b60}
+.lot-tip .tip-sale{display:flex;justify-content:space-between;gap:14px;margin-top:3px}
+.lot-tip .tip-sale span{color:#5b6b63}
+.lot-tip small{display:block;margin-top:2px}

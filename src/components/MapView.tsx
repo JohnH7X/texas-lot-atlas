@@ -4,7 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { FAMILIES, type MapPosition, type ViewState, type Zone } from '../lib/types';
 import { getJSON } from '../lib/data';
 import type { FeatureCollection, Polygon } from 'geojson';
-import { FT_PER_M, LOT_MIN_ZOOM, lotEdges, lotsInBounds, streetViewUrl, type LotFeature } from '../lib/lots';
+import { FT_PER_M, LOT_MIN_ZOOM, lotEdges, lotsInBounds, streetViewUrl, type LotFeature, hoverSales } from '../lib/lots';
 
 interface Props {
   initial: ViewState;
@@ -128,10 +128,11 @@ export default function MapView(props: Props) {
           instance.addLayer({ id: 'lot-hover', type: 'fill', source: 'lots', filter: ['==', ['get', 'NO_LOT'], ''], paint: { 'fill-color': '#f2c200', 'fill-opacity': 0.28 } });
           // Hovering a parcel highlights it and names it; one map-wide handler so it follows the pointer and clears off-parcel, off-map, on drag and zoom.
           const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: 'lot-tip', offset: 12 });
-          let hovered = '';
+          let hovered = '', salesTimer = 0;
+          const salesCache = new Map<string, string>();
           const clearHover = () => {
             if (!instance || !hovered) return;
-            hovered = ''; instance.getCanvas().style.cursor = '';
+            hovered = ''; window.clearTimeout(salesTimer); instance.getCanvas().style.cursor = '';
             instance.setFilter('lot-hover', ['==', ['get', 'NO_LOT'], '']); tip.remove();
           };
           instance.on('mousemove', e => {
@@ -141,10 +142,22 @@ export default function MapView(props: Props) {
             const id = String(p.NO_LOT);
             instance.getCanvas().style.cursor = 'pointer';
             tip.setLngLat(e.lngLat);
-            if (id === hovered) return;
-            hovered = id;
+            const mode = document.body.dataset.lotTab || '';
+            if (id + mode === hovered) return;
+            hovered = id + mode;
             instance.setFilter('lot-hover', ['==', ['get', 'NO_LOT'], id]);
-            tip.setHTML(`<b>Parcel ${String(p.LABEL || p.NO_LOT).replace(/[<>&]/g, '')}</b><br><small>Click for owner, value & sales</small>`).addTo(instance);
+            const head = `<b>Parcel ${String(p.LABEL || p.NO_LOT).replace(/[<>&]/g, '')}</b>`;
+            window.clearTimeout(salesTimer);
+            if (mode !== 'sales') { tip.setHTML(`${head}<br><small>Click for owner, value & sales</small>`).addTo(instance); return; }
+            // Sales tab open: show this parcel's sales, fetched after a short pause and cached.
+            const cached = salesCache.get(id);
+            tip.setHTML(`${head}${cached ?? '<br><small>Loading sales…</small>'}`).addTo(instance);
+            if (cached) return;
+            const at: [number, number] = [e.lngLat.lng, e.lngLat.lat], key = hovered;
+            salesTimer = window.setTimeout(() => {
+              void hoverSales(at).then(html => { salesCache.set(id, html); if (hovered === key) tip.setHTML(`${head}${html}`); })
+                .catch(() => { if (hovered === key) tip.setHTML(`${head}<br><small>Sales unavailable — click to open</small>`); });
+            }, 250);
           });
           instance.getContainer().addEventListener('mouseleave', clearHover);
           instance.on('dragstart', clearHover);
